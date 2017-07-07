@@ -29,6 +29,7 @@ import com.google.android.gms.appindexing.Action;
 import com.google.android.gms.appindexing.AppIndex;
 import com.google.android.gms.appindexing.Thing;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.server.converter.StringToIntConverter;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -45,6 +46,7 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.net.URL;
 import java.net.UnknownHostException;
+import java.sql.Time;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Timer;
@@ -70,6 +72,8 @@ public class Accelerometer extends AppCompatActivity {
     private Button stop;
     private Button open;
     private Button settings;
+    private Button sample_time;
+    private String sample_button_text = "采样数据时间间隔：";
     private String[] areas = new String[]{"FASTEST", "GAME", "UI", "NORMAL" };
     //对应SensorManager的0,1,2,3
     private RadioOnClick radioOnClick = new RadioOnClick(0);
@@ -88,31 +92,11 @@ public class Accelerometer extends AppCompatActivity {
     private boolean useNet = true;
     //！！！使用时手机要和服务器处于同一局域网下。。。
 
-    private final float[] angles = new float[3];
-    private static final float NS2S = 1.0f / 1000000000.0f;
-    private final float[] deltaRotationVector = new float[4];
-    private final float[] deltaRotationMatrix = new float[9];
-    private float[] currentRotationMatrix = new float[9];
-    private float[] initialRotationMatrix = new float[9];
-    private float[] accMagOrientation = new float[3];
+
     private float[] gyroOrientation = new float[3];
-    private float[] fusedOrientation = new float[3];
-    //基于加速度和磁力计的旋转矩阵
-    private float[] rotationMatrix = new float[9];
     private float[] accel = new float[3];
     private float[] magnet = new float[3];
-    private float[] gyro = new float[3];
-    public static final int TIME_CONSTANT = 30;
-    public static final float FILTER_COEFFICIENT = 0.98f;
-    private float timestamp = 0;
-    private float timestampOld = 0;
-    private boolean stateInitialized = false;
-    private boolean hasInitialOrientation = false;
-    private final float EPSILON = 0;
-    private final float[] gravity = new float[3];
-    private static final float alpha = 0.8f;
-    private float zeroShift = 0;
-
+    public int TIME_CONSTANT = 30;
 
     private Handler uiHandle = new Handler() {
         public void handleMessage(Message msg) {
@@ -149,7 +133,8 @@ public class Accelerometer extends AppCompatActivity {
         stop = (Button) findViewById(R.id.stop_test);
         open = (Button) findViewById(R.id.open);
         settings = (Button) findViewById(R.id.settings);
-
+        sample_time = (Button) findViewById(R.id.sample_time);
+        sample_time.setText(sample_button_text + String.valueOf(TIME_CONSTANT) + "ms");
         now_time = (TextView) findViewById(R.id.now_time);
         mContext = getApplicationContext();
 
@@ -177,18 +162,14 @@ public class Accelerometer extends AppCompatActivity {
                 }
                 filedetail = new String();
                 data_num = 0;
-                timestamp = 0;
                 Timer timer = new Timer();
-                //Timer fuseTimer = new Timer();
                 timer.schedule(new TimerTask() {
                     @Override
                     public void run() {
                         if(isPaused) return;
                         writeFile(false);
                         // TODO Auto-generated method stub
-                    }},0, 30);
-                //fuseTimer.scheduleAtFixedRate(new calculateFusedOrientationTask(), 1000, TIME_CONSTANT);
-                Log.i("debug start", start_time+ Environment.getExternalStorageDirectory());
+                    }},0, TIME_CONSTANT);
                 onResume();
                 uiHandle.removeMessages(1);
                 isPaused = false;
@@ -203,7 +184,6 @@ public class Accelerometer extends AppCompatActivity {
             public void onClick(View v) {
                 stopClicked = true;
                 isPaused = true;
-                timestamp = 0;
                 if (useNet){
                     try {
                         socket.close();
@@ -215,6 +195,7 @@ public class Accelerometer extends AppCompatActivity {
                 sensorManager.unregisterListener(sensorEventListener);
             }
         });
+
         open.setOnClickListener(new View.OnClickListener() {
 
             @Override
@@ -245,19 +226,7 @@ public class Accelerometer extends AppCompatActivity {
                                 try {
                                     socket=new Socket(urlPath, 12345);
                                     Toast.makeText(Accelerometer.this, "Socket创建成功", Toast.LENGTH_LONG).show();
-                                } catch (SocketException e) {
-                                    Log.i("ipsss",urlPath);
-                                    Toast.makeText(Accelerometer.this, e.getMessage(), Toast.LENGTH_LONG).show();
-                                    e.getCause();
-                                } catch (UnknownHostException e) {
-                                    Log.i("ipsss",urlPath);
-                                    Toast.makeText(Accelerometer.this, e.getMessage(), Toast.LENGTH_LONG).show();
-                                    e.printStackTrace();
                                 } catch (IOException e) {
-                                    Log.i("ipsss",urlPath);
-                                    Toast.makeText(Accelerometer.this, e.getMessage(), Toast.LENGTH_LONG).show();
-                                    e.printStackTrace();
-                                } catch(NetworkOnMainThreadException e){
                                     Log.i("ipsss",urlPath);
                                     Toast.makeText(Accelerometer.this, e.getMessage(), Toast.LENGTH_LONG).show();
                                     e.printStackTrace();
@@ -266,6 +235,27 @@ public class Accelerometer extends AppCompatActivity {
                         }).start();
                     }
                 });
+                AlertDialog dialog=builder.create();
+                dialog.show();
+            }
+        });
+        sample_time.setOnClickListener(new View.OnClickListener() {
+
+            @Override
+            public void onClick(View v) {
+                final AlertDialog.Builder builder=new AlertDialog.Builder(Accelerometer.this);
+                builder.setTitle("输入时间间隔");
+                final EditText ed = new EditText(Accelerometer.this);
+                ed.setText(String.valueOf(TIME_CONSTANT));
+                builder.setView(ed);
+                builder.setPositiveButton("确定", new DialogInterface.OnClickListener(){
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        TIME_CONSTANT = Integer.valueOf(ed.getText().toString());
+                        sample_time.setText(sample_button_text + String.valueOf(TIME_CONSTANT) + "ms");
+                    }
+                });
+
                 AlertDialog dialog=builder.create();
                 dialog.show();
             }
@@ -285,27 +275,6 @@ public class Accelerometer extends AppCompatActivity {
                 areaListView=ad.getListView();
                 ad.show();
             }
-        }
-    }
-    class calculateFusedOrientationTask extends TimerTask {
-        public void run() {
-            float oneMinusCoeff = 1.0f - FILTER_COEFFICIENT;
-            fusedOrientation[0] =
-                    FILTER_COEFFICIENT * gyroOrientation[0]
-                            + oneMinusCoeff * accMagOrientation[0];
-
-            fusedOrientation[1] =
-                    FILTER_COEFFICIENT * gyroOrientation[1]
-                            + oneMinusCoeff * accMagOrientation[1];
-
-            fusedOrientation[2] =
-                    FILTER_COEFFICIENT * gyroOrientation[2]
-                            + oneMinusCoeff * accMagOrientation[2];
-
-            // overwrite gyro matrix and orientation with fused orientation
-            // to comensate gyro drift
-            currentRotationMatrix = getRotationMatrixFromOrientation(fusedOrientation);
-            System.arraycopy(fusedOrientation, 0, gyroOrientation, 0, 3);
         }
     }
 
@@ -335,27 +304,9 @@ public class Accelerometer extends AppCompatActivity {
         gyroscopeView.setText("Gyroscope: " + gyroOrientation[0] + ", " + gyroOrientation[1] + ", " + gyroOrientation[2]);
         accelerometerView.setText("Accelerometer: " + accel[0] + ", " + accel[1] + ", " + accel[2]);
     }
-    private void test(){
-        SimpleDateFormat sDateFormat = new SimpleDateFormat("HH:mm:ss:SSS");
-        Log.i("debug", sDateFormat.format(new Date()));
-    }
-    private void writeFile(boolean force){
-        SimpleDateFormat sDateFormat = new SimpleDateFormat("HH:mm:ss:SSS");
-        if (useNet) sendDataToServer();
-//        if (data_num >= 500 || force) {
-//            Log.i("debug", filedetail.length()+" at " + sDateFormat.format(new Date()));
-//            data_num = 0;
-//            try {
-//                fHelper.savaFileToSD(start_time + areas[radioOnClick.getIndex()], filedetail);
-//            } catch (Exception e) {
-//                e.printStackTrace();
-//                Toast.makeText(getApplicationContext(), "数据写入失败", Toast.LENGTH_SHORT).show();
-//            }
-//            filedetail = "";
-//        }
-//        filedetail += sDateFormat.format(new Date()) + "\nx1 " + gyroOrientation[0] + " y1 " + gyroOrientation[1] + " z1 " + gyroOrientation[2]
-//                + "\nx2 " + accel[0] + " y2 " + accel[1] + " z2 " + accel[2] + "\nx3 " + magnet[0] + " y3 " + magnet[1] + " z3 " + magnet[2] + "\n";
 
+    private void writeFile(boolean force){
+        sendDataToServer();
         data_num++;
     }
 
@@ -414,7 +365,6 @@ public class Accelerometer extends AppCompatActivity {
     @Override
     public void onStart() {
         super.onStart();
-
         // ATTENTION: This was auto-generated to implement the App Indexing API.
         // See https://g.co/AppIndexing/AndroidStudio for more information.
         client.connect();
@@ -435,12 +385,8 @@ public class Accelerometer extends AppCompatActivity {
         //可以得到传感器实时测量出来的变化值
         @Override
         public void onSensorChanged(SensorEvent event) {
-            //得到角速度的值
-
-            //得到加速度的值
             if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER && !isPaused) {
                 System.arraycopy(event.values, 0, accel, 0, 3);
-                //calculateAccMagOrientation();
             }
             else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD && !isPaused) {
                 System.arraycopy(event.values, 0, magnet, 0, 3);
@@ -448,186 +394,11 @@ public class Accelerometer extends AppCompatActivity {
             else if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE && !isPaused) {
                 System.arraycopy(event.values, 0, gyroOrientation, 0, 3);
             }
-
         }
         //重写变化
         @Override
         public void onAccuracyChanged(Sensor sensor, int accuracy) {
         }
-    }
-    public void gyroFunction(SensorEvent event) {
-        if (!hasInitialOrientation)
-        {
-            hasInitialOrientation = SensorManager.getRotationMatrix(
-                    initialRotationMatrix, null, accel, magnet);
-            if(!hasInitialOrientation) return;
-        }
-
-        // Initialization of the gyroscope based rotation matrix
-        if (!stateInitialized)
-        {
-            currentRotationMatrix = initialRotationMatrix.clone();
-            stateInitialized = true;
-        }
-
-        // This timestep's delta rotation to be multiplied by the current
-        // rotation after computing it from the gyro sample data.
-
-        if (stateInitialized)
-        {
-            // Axis of the rotation sample, not normalized yet.
-            timestamp = event.timestamp;
-            final float dT = (timestamp - timestampOld) * NS2S;
-            timestampOld = timestamp;
-            if(dT == 0) return;
-            float axisX = event.values[0];
-            float axisY = event.values[1];
-            float axisZ = event.values[2];
-
-            // Calculate the angular speed of the sample
-            float omegaMagnitude = (float) Math.sqrt(axisX * axisX + axisY
-                    * axisY + axisZ * axisZ);
-            // Normalize the rotation vector if it's big enough to get the axis
-            if (omegaMagnitude > EPSILON)
-            {
-                axisX /= omegaMagnitude;
-                axisY /= omegaMagnitude;
-                axisZ /= omegaMagnitude;
-            }
-
-            // Integrate around this axis with the angular speed by the timestep
-            // in order to get a delta rotation from this sample over the
-            // timestep. We will convert this axis-angle representation of the
-            // delta rotation into a quaternion before turning it into the
-            // rotation matrix.
-            float thetaOverTwo = omegaMagnitude * dT / 2.0f;
-
-            float sinThetaOverTwo = (float) Math.sin(thetaOverTwo);
-            float cosThetaOverTwo = (float) Math.cos(thetaOverTwo);
-
-            deltaRotationVector[0] = sinThetaOverTwo * axisX;
-            deltaRotationVector[1] = sinThetaOverTwo * axisY;
-            deltaRotationVector[2] = sinThetaOverTwo * axisZ;
-            deltaRotationVector[3] = cosThetaOverTwo;
-
-            SensorManager.getRotationMatrixFromVector(
-                    deltaRotationMatrix,
-                    deltaRotationVector);
-
-            currentRotationMatrix = matrixMultiplication(
-                    currentRotationMatrix,
-                    deltaRotationMatrix);
-//            Log.v("deltaRotationMatrix", String.valueOf(deltaRotationMatrix[1]));
-            SensorManager.getOrientation(currentRotationMatrix,
-                    gyroOrientation);
-
-            float oneMinusCoeff = 1.0f - FILTER_COEFFICIENT;
-            fusedOrientation[0] =
-                    FILTER_COEFFICIENT * gyroOrientation[0]
-                            + oneMinusCoeff * accMagOrientation[0];
-
-            fusedOrientation[1] =
-                    FILTER_COEFFICIENT * gyroOrientation[1]
-                            + oneMinusCoeff * accMagOrientation[1];
-
-            fusedOrientation[2] =
-                    FILTER_COEFFICIENT * gyroOrientation[2]
-                            + oneMinusCoeff * accMagOrientation[2];
-
-            // overwrite gyro matrix and orientation with fused orientation
-            // to comensate gyro drift
-            currentRotationMatrix = getRotationMatrixFromOrientation(fusedOrientation);
-            System.arraycopy(fusedOrientation, 0, gyroOrientation, 0, 3);
-//            SensorManager.getOrientation(matrixMultiSpec(currentRotationMatrix, initialRotationMatrix) ,
-//                    gyroOrientation);
-            gyroOrientation[0]*=180/(float)Math.PI;
-            gyroOrientation[1]*=180/(float)Math.PI;
-            gyroOrientation[2]*=180/(float)Math.PI;
-        }
-
-    }
-    public void calculateAccMagOrientation() {
-        if(SensorManager.getRotationMatrix(rotationMatrix, null, accel, magnet)) {
-            SensorManager.getOrientation(rotationMatrix, accMagOrientation);
-        }
-    }
-    private float[] getRotationMatrixFromOrientation(float[] o) {
-        float[] xM = new float[9];
-        float[] yM = new float[9];
-        float[] zM = new float[9];
-
-        float sinX = (float)Math.sin(o[1]);
-        float cosX = (float)Math.cos(o[1]);
-        float sinY = (float)Math.sin(o[2]);
-        float cosY = (float)Math.cos(o[2]);
-        float sinZ = (float)Math.sin(o[0]);
-        float cosZ = (float)Math.cos(o[0]);
-
-        // rotation about x-axis (pitch)
-        xM[0] = 1.0f; xM[1] = 0.0f; xM[2] = 0.0f;
-        xM[3] = 0.0f; xM[4] = cosX; xM[5] = sinX;
-        xM[6] = 0.0f; xM[7] = -sinX; xM[8] = cosX;
-
-        // rotation about y-axis (roll)
-        yM[0] = cosY; yM[1] = 0.0f; yM[2] = sinY;
-        yM[3] = 0.0f; yM[4] = 1.0f; yM[5] = 0.0f;
-        yM[6] = -sinY; yM[7] = 0.0f; yM[8] = cosY;
-
-        // rotation about z-axis (azimuth)
-        zM[0] = cosZ; zM[1] = sinZ; zM[2] = 0.0f;
-        zM[3] = -sinZ; zM[4] = cosZ; zM[5] = 0.0f;
-        zM[6] = 0.0f; zM[7] = 0.0f; zM[8] = 1.0f;
-
-        // rotation order is y, x, z (roll, pitch, azimuth)
-        float[] resultMatrix = matrixMultiplication(xM, yM);
-        resultMatrix = matrixMultiplication(zM, resultMatrix);
-        return resultMatrix;
-    }
-    private float[] matrixMultiplication(float[] a, float[] b)
-    {
-        float[] result = new float[9];
-
-        result[0] = a[0] * b[0] + a[1] * b[3] + a[2] * b[6];
-        result[1] = a[0] * b[1] + a[1] * b[4] + a[2] * b[7];
-        result[2] = a[0] * b[2] + a[1] * b[5] + a[2] * b[8];
-
-        result[3] = a[3] * b[0] + a[4] * b[3] + a[5] * b[6];
-        result[4] = a[3] * b[1] + a[4] * b[4] + a[5] * b[7];
-        result[5] = a[3] * b[2] + a[4] * b[5] + a[5] * b[8];
-
-        result[6] = a[6] * b[0] + a[7] * b[3] + a[8] * b[6];
-        result[7] = a[6] * b[1] + a[7] * b[4] + a[8] * b[7];
-        result[8] = a[6] * b[2] + a[7] * b[5] + a[8] * b[8];
-
-        return result;
-    }
-    private float[] matrixMultiSpec(float[] a, float[] b)
-    {
-        /*返回a乘以b的转置
-        * <pre>
-        *   /  a[ 0]   a[ 1]   a[ 2]   \
-        *   |  a[ 3]   a[ 4]   a[ 5]   |
-        *   \  a[ 6]   a[ 7]   a[ 8]   /
-        *   /  b[ 0]   b[ 3]   b[ 6]   \
-        *   |  b[ 1]   b[ 4]   b[ 7]   |
-        *   \  b[ 2]   b[ 5]   b[ 8]   /
-        *</pre>
-        */
-        float[] result = new float[9];
-
-        result[0] = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-        result[1] = a[0] * b[3] + a[1] * b[4] + a[2] * b[5];
-        result[2] = a[0] * b[6] + a[1] * b[7] + a[2] * b[8];
-
-        result[3] = a[3] * b[0] + a[4] * b[1] + a[5] * b[2];
-        result[4] = a[3] * b[3] + a[4] * b[4] + a[5] * b[5];
-        result[5] = a[3] * b[6] + a[4] * b[7] + a[5] * b[8];
-
-        result[6] = a[6] * b[0] + a[7] * b[1] + a[8] * b[2];
-        result[7] = a[6] * b[3] + a[7] * b[4] + a[8] * b[5];
-        result[8] = a[6] * b[6] + a[7] * b[7] + a[8] * b[8];
-
-        return result;
     }
 }
 
